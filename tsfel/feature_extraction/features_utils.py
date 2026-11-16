@@ -436,6 +436,17 @@ def get_templates(signal, m=3):
     np.ndarray
         Array of template vectors.
     """
+    if (
+        type(signal) is np.ndarray
+        and signal.ndim == 1
+        and isinstance(m, (int, np.integer))
+        and 0 < m <= len(signal)
+    ):
+        m = int(m)
+        templates = np.empty((len(signal) - m + 1, m), dtype=signal.dtype)
+        for column in range(m):
+            templates[:, column] = signal[column : column + templates.shape[0]]
+        return templates
     return np.array([signal[i : i + m] for i in np.arange(len(signal) - m + 1)])
 
 
@@ -456,19 +467,30 @@ def sample_entropy(signal, m, tolerance):
     float
         Sample Entropy of a signal.
     """
+    def neighbor_counts(templates):
+        if (
+            templates.ndim == 2
+            and 0 < templates.shape[0] <= 512
+            and templates.shape[1] > 0
+            and templates.dtype == np.float64
+            and np.isfinite(templates).all()
+            and isinstance(tolerance, (float, np.floating))
+            and np.isfinite(tolerance)
+        ):
+            distances = scipy.spatial.distance.cdist(
+                templates, templates, metric="chebyshev",
+            )
+            return np.count_nonzero(distances <= tolerance, axis=1).astype(np.float64)
+        tree = KDTree(templates, leaf_size=16, metric="chebyshev")
+        return tree.query_radius(templates, tolerance, count_only=True).astype(np.float64)
+
     templates_B = get_templates(signal, m)
     templates_B = templates_B[:-1]
-    kdtree_B = KDTree(templates_B, metric="chebyshev")
-    count_B = kdtree_B.query_radius(templates_B, tolerance, count_only=True).astype(
-        np.float64,
-    )
+    count_B = neighbor_counts(templates_B)
     proportion_B = np.mean((count_B - 1) / (templates_B.shape[0] - 1))
 
     templates_A = get_templates(signal, m + 1)
-    kdtree_A = KDTree(templates_A, metric="chebyshev")
-    count_A = kdtree_A.query_radius(templates_A, tolerance, count_only=True).astype(
-        np.float64,
-    )
+    count_A = neighbor_counts(templates_A)
     proportion_A = np.mean((count_A - 1) / (templates_A.shape[0] - 1))
 
     if proportion_B > 0 and proportion_A > 0:
